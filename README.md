@@ -70,16 +70,37 @@ safe in automation; `--no-input` forces that path explicitly.
 
 ### Uploading
 
-`trajectories upload` takes a **job directory**, not a bare `trajectory.json`, so
-use `--job` when the goal is to view a session on trajectories.sh:
+Both uploaders take a **job directory**, not a bare `trajectory.json`, so pass
+`--job` whenever the goal is to view a session in Harbor or on trajectories.sh.
+A plain `atif export` is for reading and diffing locally.
 
 ```sh
 atif export --job -o /tmp/myjob
+```
+
+**Harbor.** `upload` sends the job to a Harbor server; `view` opens it in the
+local viewer without uploading anything, which is the quicker way to check that a
+conversion looks right.
+
+```sh
+harbor view /tmp/myjob
+harbor upload /tmp/myjob
+```
+
+Harbor is not on PyPI, so install it from git:
+
+```sh
+uv tool install 'harbor @ git+https://github.com/harbor-framework/harbor'
+```
+
+**trajectories.sh.**
+
+```sh
 npx trajectories-sh upload trajectory /tmp/myjob --slug my-session
 ```
 
 Set `TRAJECTORIES_API_KEY` in your environment, or put it in
-`~/.config/atif/trajectories.env`:
+`~/.config/atif/trajectories.env` (`ATIF_ENV_FILE` overrides the location):
 
 ```sh
 TRAJECTORIES_API_KEY=your-key-here
@@ -87,6 +108,13 @@ TRAJECTORIES_API_KEY=your-key-here
 
 The key is passed to the uploader through its environment only. It is never put
 in a command line, logged, or written into an export.
+
+The interactive menu runs exactly these commands for you, and lists only the
+destinations it can find. An uninstalled uploader or a missing key is a dead end
+rather than a choice, so it is left out and the setup hint is printed instead.
+Harbor counts only when `harbor` is on PATH: it can also be run straight from
+git, but offering that as a menu entry would invite you to pick what looks
+instant and then wait for a compile.
 
 Exported sessions carry `verifier_result.reward: null`. They were never graded,
 and a fabricated reward would render as a benchmark score.
