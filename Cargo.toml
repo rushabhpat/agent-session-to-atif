@@ -1,0 +1,23 @@
+[package]
+name = "atif-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Rust core for exporting agent sessions as ATIF trajectories"
+license = "MIT"
+
+[lib]
+name = "atif_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps object keys in insertion order, so emitted trajectories
+# read in schema order and byte-compare cleanly against the Python exporter.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

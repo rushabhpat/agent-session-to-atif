@@ -1,0 +1,38 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "atif-export"
+version = "0.1.0"
+description = "Export Cursor, Claude Code, and Codex sessions as ATIF trajectories"
+readme = "README.md"
+# 3.9 exists on macOS as a universal2 stub whose reported platform disagrees
+# with the arm64 wheel maturin builds, so the floor is 3.10. The CLI needs no
+# newer syntax than that.
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["atif", "harbor", "trajectory", "cursor", "claude-code", "codex"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Debuggers",
+]
+# No runtime dependencies: the parsing core is compiled in, and the CLI uses
+# only the standard library. This is what lets `uvx atif-export` be a single
+# fast install with nothing to resolve.
+dependencies = []
+
+[project.scripts]
+atif = "atif.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/rushabhpat/agent-session-to-atif"
+Repository = "https://github.com/rushabhpat/agent-session-to-atif"
+"ATIF spec" = "https://docs.harborframework.com/core-concepts/agents/atif"
+
+[tool.maturin]
+# Mixed layout: compiled core as `atif._core`, CLI and TTY code as plain Python.
+python-source = "python"
+module-name = "atif._core"
+features = ["pyo3/extension-module"]

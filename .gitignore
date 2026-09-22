@@ -1,0 +1,19 @@
+# Rust build output: large, and reproducible from Cargo.lock.
+/target/
+
+# Python bytecode and build artefacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+/dist/
+/build/
+
+# Exported trajectories are a verbatim replay of an agent session, so they can
+# contain anything that passed through that terminal. The default output paths
+# are the working directory, which makes an accidental commit easy; ignore them
+# so it takes an explicit `git add -f` and a reason.
+/trajectory.json
+/atif-out/
+/atif-jobs/
+
+.DS_Store
