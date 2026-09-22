@@ -358,7 +358,7 @@ impl Steps {
     }
 
     /// Attach a result to whichever step issued `call_id`.
-    pub fn observe(&mut self, call_id: &str, content: String, extra: Map<String, Value>) -> bool {
+    pub fn observe(&mut self, call_id: &str, content: Value, extra: Map<String, Value>) -> bool {
         let Some(&idx) = self.owner.get(call_id) else {
             return false;
         };
@@ -368,7 +368,7 @@ impl Steps {
         if !extra.is_empty() {
             result.insert("extra".into(), Value::Object(extra));
         }
-        result.insert("content".into(), json!(content));
+        result.insert("content".into(), content);
         self.steps[idx]
             .entry("observation")
             .or_insert_with(|| json!({ "results": [] }))
@@ -452,6 +452,89 @@ impl Meta {
 }
 
 /// Assemble a trajectory: number the steps and total the metrics.
+/// Split a `data:` URL into its media type and base64 payload.
+fn data_url(url: &str) -> Option<(&str, &str)> {
+    let (meta, data) = url.strip_prefix("data:")?.split_once(',')?;
+    Some((meta.strip_suffix(";base64")?, data))
+}
+
+/// The image URL on a content part, whether given flat or nested under `url`.
+fn image_url(part: &Value) -> Option<&str> {
+    match part.get("image_url")? {
+        Value::String(s) => Some(s.as_str()),
+        nested => str_at(nested, "url"),
+    }
+}
+
+/// The base64 payload on a Claude-style image part: `source.{media_type,data}`.
+fn nested_image(part: &Value) -> Option<(&str, &str)> {
+    if part.get("type")?.as_str()? != "image" {
+        return None;
+    }
+    let source = part.get("source")?;
+    Some((str_at(source, "media_type")?, str_at(source, "data")?))
+}
+
+/// Convert a provider content array into ATIF content parts, if it holds images.
+///
+/// Codex returns tool output as a list of parts, and a screenshot arrives as an
+/// `input_image` carrying a `data:` URL; Claude uses `source.data` instead.
+/// Flattening either to text inlines every screenshot as base64: one real
+/// session reached 244 MB, 98% of it image data, which no viewer can render and
+/// which the uploader rejects for exceeding its 50 MB per-file cap while
+/// reporting it as a missing file.
+///
+/// ATIF's own answer is an image part pointing at a file, so the payload is
+/// carried here as base64 and externalised when the trajectory is written, where
+/// the destination directory is known. Text-only output is left alone: it is
+/// already faithful as a string, and restructuring it would churn every session
+/// for no gain.
+pub fn content_parts(v: &Value) -> Option<Value> {
+    let arr = v.as_array()?;
+    if !arr
+        .iter()
+        .any(|p| image_url(p).is_some() || nested_image(p).is_some())
+    {
+        return None;
+    }
+    let mut out: Vec<Value> = Vec::new();
+    for part in arr {
+        if let Some((media, data)) = nested_image(part) {
+            out.push(json!({
+                "type": "image",
+                "source": { "media_type": media, "data": data },
+            }));
+            continue;
+        }
+        match image_url(part) {
+            Some(url) => match data_url(url) {
+                Some((media, data)) => out.push(json!({
+                    "type": "image",
+                    "source": { "media_type": media, "data": data },
+                })),
+                // A remote image: reference it rather than invent a payload.
+                None => out.push(json!({ "type": "image", "source": { "path": url } })),
+            },
+            None => {
+                // `text_of` flattens an array; this is one part, so read it
+                // directly. Anything unrecognised is stringified rather than
+                // dropped: silently losing a part would be worse than noise.
+                let text = match part {
+                    Value::String(s) => s.clone(),
+                    _ => match str_at(part, "text") {
+                        Some(t) => t.to_string(),
+                        None => stringify(part),
+                    },
+                };
+                if !text.is_empty() {
+                    out.push(json!({ "type": "text", "text": text }));
+                }
+            }
+        }
+    }
+    Some(Value::Array(out))
+}
+
 pub fn trajectory(meta: Meta, steps: Vec<Map<String, Value>>) -> Value {
     let mut numbered = steps;
     for (i, step) in numbered.iter_mut().enumerate() {

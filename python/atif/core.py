@@ -1,6 +1,9 @@
 """Session discovery and export, wrapping the compiled core."""
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +12,16 @@ from . import _core
 
 SCHEMA = _core.SCHEMA
 AGENTS = tuple(_core.AGENTS)
+
+# Only what a coding agent actually captures; anything else keeps a .bin name
+# rather than guessing an extension from an unfamiliar media type.
+MEDIA_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+}
 
 
 class Session:
@@ -94,8 +107,65 @@ def validate(traj: dict) -> list[str]:
     return _core.validate_json(json.dumps(traj))
 
 
+def _media_parts(traj: dict):
+    """Yield every content part in the trajectory that could hold media.
+
+    Images turn up in two places: what the model was sent (`message`) and what a
+    tool returned (`observation.results[].content`). Both are only lists when an
+    adapter kept them structured, which it does exactly when there was an image
+    worth keeping.
+    """
+    for step in traj.get("steps") or []:
+        if isinstance(step.get("message"), list):
+            yield from (p for p in step["message"] if isinstance(p, dict))
+        for result in (step.get("observation") or {}).get("results") or []:
+            if isinstance(result.get("content"), list):
+                yield from (p for p in result["content"] if isinstance(p, dict))
+
+
+def externalise_media(traj: dict, dest_dir: Path) -> tuple[int, int]:
+    """Move inline base64 media out of the trajectory into sibling files.
+
+    ATIF references media by path, and both validators resolve that path relative
+    to trajectory.json. Leaving the payload inline technically validates, but it
+    is unusable: a screenshot-heavy session inlines to hundreds of megabytes, the
+    viewer cannot render it, and trajectories.sh drops any file over 50 MB and
+    then reports it as missing. Splitting it out keeps the trajectory small and
+    lets each image upload as its own file.
+
+    Names are content hashes, so a screenshot repeated across turns is stored
+    once. Returns (files written, bytes moved out).
+    """
+    written: dict[str, str] = {}
+    freed = 0
+    for part in _media_parts(traj):
+        source = part.get("source")
+        if not isinstance(source, dict):
+            continue
+        data = source.get("data")
+        if not isinstance(data, str) or not data:
+            continue
+        try:
+            blob = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            continue  # Not decodable: leave it be rather than lose it.
+        digest = hashlib.sha256(blob).hexdigest()[:16]
+        ext = MEDIA_EXT.get(source.get("media_type", ""), "bin")
+        name = f"media/{digest}.{ext}"
+        if name not in written:
+            path = dest_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(blob)
+            written[name] = name
+        freed += len(data)
+        source.pop("data", None)
+        source["path"] = name
+    return len(written), freed
+
+
 def write(traj: dict, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    externalise_media(traj, dest.parent)
     dest.write_text(json.dumps(traj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return dest
 

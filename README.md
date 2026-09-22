@@ -170,6 +170,35 @@ Two details that are easy to get wrong, both learned from real logs:
   repeating `usage` on each. Group by that id and count usage once; summing it
   inflates every token total several-fold.
 
+### Screenshots
+
+Sessions that take screenshots carry them inline as base64. Flattening those into
+the trajectory produces a file that is mostly image data: one real codex session
+came to 244 MB, 98% of it base64, which no viewer can render.
+
+So images are written as files beside the trajectory and referenced by path,
+which is what ATIF expects:
+
+```
+trajectory.json
+media/<sha256>.png
+```
+
+That took the same session to 4.5 MB, and the server then recognised the images
+as screenshots. Names are content hashes, so an image repeated across turns is
+stored once. Keep `media/` next to `trajectory.json` when moving an export: both
+validators resolve those paths relative to the trajectory.
+
+This also explains a confusing upload error. `trajectories upload` skips any file
+over 50 MB, then validates against the list of files it kept, so an oversized
+trajectory is reported as:
+
+```
+✗ Trial "...": missing agent/trajectory.json
+```
+
+The file is present. It was too big, and 98% of the bulk was screenshots.
+
 Harness plumbing is dropped rather than exported as conversation. Typing `/clear`
 makes Claude Code write three bookkeeping records; emitting them would invent
 user turns that never happened. Injected context such as `<environment_context>`

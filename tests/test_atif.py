@@ -10,6 +10,7 @@ The corpus check then runs every session on this machine through the converter,
 which is what catches format variants no fixture anticipates. The parsing core
 under test is compiled Rust; these tests exercise it through the Python API.
 """
+import base64
 import contextlib
 import io
 import json
@@ -45,6 +46,7 @@ class atif:  # noqa: N801 - a namespace so the assertions below read unchanged
     # Python layer
     discover = staticmethod(core.discover)
     write = staticmethod(core.write)
+    externalise_media = staticmethod(core.externalise_media)
     main = staticmethod(cli.main)
     ellipsis = staticmethod(tui.ellipsis)
     api_key = staticmethod(tui.api_key)
@@ -710,6 +712,78 @@ class TestCLI(Base):
              contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(atif.main([]), 2)
         self.assertIn("usage:", out.getvalue())
+
+    def test_inline_images_become_files_next_to_the_trajectory(self):
+        """Base64 payloads must not stay inline: that is what broke uploads.
+
+        A screenshot-heavy codex session inlined to 244 MB, 98% image data. The
+        uploader silently drops any file over 50 MB and then reports it as
+        "missing agent/trajectory.json", so the symptom names the wrong file.
+        """
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"pixels").decode()
+        records = [
+            {"type": "message", "role": "user", "content": "shot",
+             "timestamp": "2026-01-01T00:00:00Z"},
+            {"type": "function_call", "name": "screenshot", "call_id": "c1",
+             "arguments": "{}", "timestamp": "2026-01-01T00:00:01Z"},
+            {"type": "function_call_output", "call_id": "c1",
+             "output": {"content": [
+                 {"type": "input_text", "text": "captured"},
+                 {"type": "input_image", "image_url": f"data:image/png;base64,{png}"},
+             ]},
+             "timestamp": "2026-01-01T00:00:02Z"},
+        ]
+        log = write_log(self.tmp, "rollout-2026-01-01T00-00-00-aaaaaaaa-0000-0000-0000-000000000000.jsonl",
+                        records)
+        dest = self.tmp / "out" / "trajectory.json"
+        self.assertEqual(atif.main(["export", str(log), "-o", str(dest)]), 0)
+
+        traj = json.loads(dest.read_text())
+        blob = json.dumps(traj)
+        self.assertNotIn("base64", blob)
+        self.assertNotIn(png, blob)
+
+        # The image is a real file, at the path the trajectory advertises, which
+        # is how both validators resolve it: relative to trajectory.json.
+        parts = [p for s in traj["steps"]
+                 for r in (s.get("observation") or {}).get("results") or []
+                 if isinstance(r.get("content"), list)
+                 for p in r["content"] if p.get("type") == "image"]
+        self.assertEqual(len(parts), 1, traj["steps"])
+        rel = parts[0]["source"]["path"]
+        self.assertNotIn("data", parts[0]["source"])
+        written = dest.parent / rel
+        self.assertTrue(written.exists(), rel)
+        self.assertEqual(written.read_bytes(), base64.b64decode(png))
+        self.assertTrue(rel.endswith(".png"), rel)
+        # Surrounding text survives as a sibling part rather than being lost.
+        self.assertTrue(any(p.get("text") == "captured" for s in traj["steps"]
+                            for r in (s.get("observation") or {}).get("results") or []
+                            if isinstance(r.get("content"), list)
+                            for p in r["content"]))
+
+    def test_repeated_screenshots_are_stored_once(self):
+        """Content-addressed names dedupe an image repeated across turns."""
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\nsame").decode()
+        traj = {"steps": [
+            {"observation": {"results": [{"content": [
+                {"type": "image", "source": {"media_type": "image/png", "data": png}}]}]}},
+            {"observation": {"results": [{"content": [
+                {"type": "image", "source": {"media_type": "image/png", "data": png}}]}]}},
+        ]}
+        n, freed = atif.externalise_media(traj, self.tmp)
+        self.assertEqual(n, 1)
+        self.assertEqual(freed, 2 * len(png))
+        self.assertEqual(len(list((self.tmp / "media").iterdir())), 1)
+
+    def test_undecodable_media_is_left_alone(self):
+        """Better to keep an odd payload inline than to silently lose it."""
+        traj = {"steps": [{"observation": {"results": [{"content": [
+            {"type": "image", "source": {"media_type": "image/png", "data": "not!base64"}}]}]}}]}
+        n, freed = atif.externalise_media(traj, self.tmp)
+        self.assertEqual((n, freed), (0, 0))
+        src = traj["steps"][0]["observation"]["results"][0]["content"][0]["source"]
+        self.assertEqual(src["data"], "not!base64")
 
     def test_job_layout_satisfies_the_uploader_contract(self):
         """The fields `trajectories upload` validates, pinned by name.

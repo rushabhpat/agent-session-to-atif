@@ -86,7 +86,7 @@ fn metrics(usage: &Value) -> Map<String, Value> {
 }
 
 /// Prefer the structured tool result, falling back to the model-visible copy.
-fn result_content(block: &Value, rec: &Value) -> String {
+fn result_content(block: &Value, rec: &Value) -> Value {
     let content = block.get("content");
     let empty = match content {
         None | Some(Value::Null) => true,
@@ -100,21 +100,22 @@ fn result_content(block: &Value, rec: &Value) -> String {
                 for key in ["stdout", "stderr"] {
                     if let Some(s) = obj.get(key).and_then(Value::as_str) {
                         if !s.is_empty() {
-                            return s.to_string();
+                            return json!(s);
                         }
                     }
                 }
-                return stringify(detail);
+                return json!(stringify(detail));
             }
             if !detail.is_null() {
-                return stringify(detail);
+                return json!(stringify(detail));
             }
         }
     }
     match content {
-        Some(v @ Value::Array(_)) => text_of(Some(v)),
-        Some(v) => stringify(v),
-        None => String::new(),
+        // Keep images structured so they can be written out as files.
+        Some(v @ Value::Array(_)) => content_parts(v).unwrap_or_else(|| json!(text_of(Some(v)))),
+        Some(v) => json!(stringify(v)),
+        None => json!(""),
     }
 }
 

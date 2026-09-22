@@ -8,6 +8,39 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn content_parts_externalises_images_and_keeps_sibling_text() {
+    // Codex: a data URL, alongside text that must not be lost.
+    let codex = json!([
+        { "type": "input_text", "text": "captured" },
+        { "type": "input_image", "image_url": "data:image/png;base64,QUJD" },
+    ]);
+    let out = content_parts(&codex).expect("images present");
+    let arr = out.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "{out}");
+    assert_eq!(arr[0]["type"], "text");
+    assert_eq!(arr[0]["text"], "captured");
+    assert_eq!(arr[1]["source"]["media_type"], "image/png");
+    assert_eq!(arr[1]["source"]["data"], "QUJD");
+
+    // Claude nests the payload under source instead.
+    let claude = json!([
+        { "type": "image", "source": { "media_type": "image/gif", "data": "R0lG" } },
+    ]);
+    let out = content_parts(&claude).expect("images present");
+    assert_eq!(out[0]["source"]["data"], "R0lG");
+
+    // A remote image is referenced, not invented.
+    let remote = json!([{ "type": "input_image", "image_url": "https://x/y.png" }]);
+    let out = content_parts(&remote).expect("images present");
+    assert_eq!(out[0]["source"]["path"], "https://x/y.png");
+
+    // Text-only content is left for the existing string path to handle, so
+    // sessions without images are byte-identical to before.
+    assert!(content_parts(&json!([{ "type": "input_text", "text": "hi" }])).is_none());
+    assert!(content_parts(&json!("plain")).is_none());
+}
+
+#[test]
 fn authored_by_separates_plumbing_from_injected_context() {
     // CLI self-narration: no turn happened, so it must not become a step.
     for s in [

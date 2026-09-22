@@ -294,13 +294,15 @@ pub fn build(path: &Path) -> Value {
 
         if matches!(ptype, "function_call_output" | "custom_tool_call_output") {
             let raw = p.get("output");
+            // Structured parts are kept structured when they carry an image, so
+            // the payload can be written out as a file instead of inlined.
             let content = match raw {
-                Some(Value::Object(map)) => map
-                    .get("content")
-                    .map(stringify)
-                    .unwrap_or_else(|| stringify(&Value::Object(map.clone()))),
-                Some(v) => stringify(v),
-                None => String::new(),
+                Some(Value::Object(map)) => match map.get("content") {
+                    Some(c) => content_parts(c).unwrap_or_else(|| json!(stringify(c))),
+                    None => json!(stringify(&Value::Object(map.clone()))),
+                },
+                Some(v) => content_parts(v).unwrap_or_else(|| json!(stringify(v))),
+                None => json!(""),
             };
             let id = str_at(p, "call_id").unwrap_or("");
             if !buf.observe(id, content, Map::new()) {
