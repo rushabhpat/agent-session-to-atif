@@ -44,7 +44,7 @@ file -b "$UV" 2>/dev/null | grep -q "$WANT" || {
   exit 1
 }
 
-echo "building the Rust core (first run takes a minute)…"
+echo "building the Rust core (first run takes a minute)..."
 "$UV" tool install --force --quiet "$SRC"
 
 BIN="$("$UV" tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
