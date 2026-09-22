@@ -21,7 +21,7 @@ from . import _core
 from .core import (
     AGENTS, Session, discover, resolve, summarise, validate, write, write_job,
 )
-from .tui import ellipsis, interactive, menu, publish_menu
+from .tui import ellipsis, interactive, menu, publish_menu, upload_hint
 
 
 def session_row(s: Session, *, show_cwd: bool) -> str:
@@ -150,7 +150,7 @@ def cmd_export(args) -> int:
             print(f"  ! {e}", file=sys.stderr)
         failures += bool(errs)
     if args.job and not failures:
-        print("\nupload with:\n  npx trajectories-sh upload trajectory <dir> --slug <slug>")
+        print("\n" + upload_hint(dest))
     return 1 if failures else 0
 
 

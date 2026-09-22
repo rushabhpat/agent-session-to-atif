@@ -237,6 +237,26 @@ def run_child(cmd: list, *, env_extra=None) -> int:
         return 130
 
 
+def upload_hint(job_dir) -> str:
+    """How to upload a job, for the paths where no menu is shown.
+
+    Mirrors `publish_menu` in preferring what is installed, but prints commands
+    rather than running them, since `--no-input` means nobody is there to answer.
+    Both destinations are named when neither is set up, because a hint that
+    mentions only one reads as if it were the only option.
+    """
+    lines = []
+    if have_harbor():
+        lines.append(f"  harbor view {job_dir}")
+        lines.append(f"  harbor upload {job_dir}")
+    if have_trajectories():
+        lines.append(f"  npx trajectories-sh upload trajectory {job_dir} --slug <slug>")
+    if not lines:
+        return ("upload with Harbor or trajectories.sh, neither of which is\n"
+                "installed; see the Uploading section of the README.")
+    return "upload with:\n" + "\n".join(lines)
+
+
 def publish_menu(job_dir: Path, slug: str) -> int:
     """Offer only what this machine can actually do with the job directory.
 

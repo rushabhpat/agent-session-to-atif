@@ -618,6 +618,33 @@ class TestCLI(Base):
             tui.publish_menu(self.tmp, "slug")
         self.assertFalse(any("trajectories.sh" in r for r in shown[0]), shown[0])
 
+    def test_upload_hint_names_harbor_not_only_trajectories(self):
+        """The non-interactive hint must cover both destinations.
+
+        `--no-input` prints instructions instead of offering a menu, so a hint
+        that mentions one uploader is the only thing those users are ever told.
+        """
+        with mock.patch.object(tui, "have_harbor", return_value=True), \
+             mock.patch.object(tui, "have_trajectories", return_value=True):
+            both = tui.upload_hint("/tmp/j")
+        self.assertIn("harbor upload /tmp/j", both)
+        self.assertIn("harbor view /tmp/j", both)
+        self.assertIn("trajectories-sh upload trajectory /tmp/j", both)
+
+        # Only what is installed is suggested.
+        with mock.patch.object(tui, "have_harbor", return_value=True), \
+             mock.patch.object(tui, "have_trajectories", return_value=False):
+            harbor_only = tui.upload_hint("/tmp/j")
+        self.assertIn("harbor upload", harbor_only)
+        self.assertNotIn("trajectories-sh", harbor_only)
+
+        # With neither, name both rather than implying one is the only route.
+        with mock.patch.object(tui, "have_harbor", return_value=False), \
+             mock.patch.object(tui, "have_trajectories", return_value=False):
+            neither = tui.upload_hint("/tmp/j")
+        self.assertIn("Harbor", neither)
+        self.assertIn("trajectories.sh", neither)
+
     def test_publish_menu_skipped_when_nothing_is_configured(self):
         """With no targets, an empty menu is useless: say what is missing."""
         with mock.patch.object(tui, "api_key", return_value=None), \
