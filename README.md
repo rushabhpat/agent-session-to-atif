@@ -1,4 +1,4 @@
-# atif
+# Agent session to atif
 
 Export your Claude Code, Codex, and Cursor sessions as
 [ATIF](https://docs.harborframework.com/core-concepts/agents/atif) trajectories,
